@@ -1,0 +1,39 @@
+{
+  "id": "com.stripe.icplus-sim-report",
+  "version": "0.0.1",
+  "name": "IC+ Fee Simulator",
+  "icon": "",
+  "permissions": [
+    {
+      "permission": "report_runs_and_report_types_read",
+      "purpose": "Read report run status and results"
+    },
+    {
+      "permission": "report_runs_and_report_types_write",
+      "purpose": "Create activity report runs"
+    },
+    {
+      "permission": "file_read",
+      "purpose": "Download report files"
+    }
+  ],
+  "app_backend": {
+    "webhooks": []
+  },
+  "ui_extension": {
+    "views": [
+      {
+        "viewport": "stripe.dashboard.home.overview",
+        "component": "ReportView"
+      }
+    ],
+    "actions": [],
+    "content_security_policy": {
+      "connect-src": [
+        "http://localhost:4243"
+      ],
+      "image-src": null
+    }
+  },
+  "post_install_action": null
+}

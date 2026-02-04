@@ -1,0 +1,22 @@
+{
+  "name": "icplus-sim-report-app",
+  "version": "0.0.1",
+  "description": "Stripe App to generate IC+ fee simulation reports",
+  "scripts": {
+    "build": "stripe apps build",
+    "start:frontend": "stripe apps start",
+    "start:backend": "npm start --prefix backend",
+    "start": "concurrently --handle-input --default-input-target 1 --names \"BACKEND,FRONTEND\" --prefix-colors \"cyan,magenta\" \"npm run start:backend\" \"npm run start:frontend\"",
+    "open": "open https://dashboard.stripe.com/test/apps-local",
+    "upload": "stripe apps upload"
+  },
+  "dependencies": {
+    "@stripe/ui-extension-sdk": "^2.0.0",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "concurrently": "^8.2.2",
+    "typescript": "^5.0.0"
+  }
+}
