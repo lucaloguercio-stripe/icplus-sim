@@ -2,8 +2,9 @@
  * Activity report (activity.itemized.3) columns — from pay-server
  * lib/financial_reporting/reports/activity/merchant_itemized3.rb Schema.
  * Only allowed column identifiers for this report type.
+ * Single source of truth for both backend and frontend.
  */
-export const ACTIVITY_COLUMNS = [
+const ACTIVITY_COLUMNS = [
   "balance_transaction_id",
   "balance_transaction_created_at",
   "balance_transaction_reporting_category",
@@ -70,3 +71,5 @@ export const ACTIVITY_COLUMNS = [
   "connected_account_country",
   "connected_account_direct_charge_id",
 ];
+
+module.exports = { ACTIVITY_COLUMNS };
