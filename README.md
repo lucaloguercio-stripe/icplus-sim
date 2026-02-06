@@ -11,8 +11,9 @@ Stripe App that generates activity reports with simulated IC+ (Interchange Plus)
 
 ```bash
 npm install
-cd backend && npm install && cd ..
 ```
+
+This installs both the Stripe App and backend dependencies (backend is installed automatically via `postinstall`).
 
 ## Run
 

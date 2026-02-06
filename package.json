@@ -3,6 +3,8 @@
   "version": "0.0.1",
   "description": "Stripe App to generate IC+ fee simulation reports",
   "scripts": {
+    "postinstall": "npm install --prefix backend",
+    "setup": "npm install && npm install --prefix backend",
     "build": "stripe apps build",
     "start:frontend": "stripe apps start",
     "start:backend": "npm start --prefix backend",
