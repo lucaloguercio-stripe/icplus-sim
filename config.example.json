@@ -1,0 +1,7 @@
+{
+  "stripe_api_key": "sk_test_YOUR_KEY_HERE",
+  "verbose": true,
+  "default_days": 30,
+  "columns_mode": "all",
+  "report_run_timeout_minutes": 30
+}

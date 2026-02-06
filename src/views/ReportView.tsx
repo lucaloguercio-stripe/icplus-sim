@@ -10,9 +10,7 @@ import {
 import type { ExtensionContextValue } from "@stripe/ui-extension-sdk/context";
 import { useState, useCallback } from "react";
 
-// Backend URL - runs locally during development
 const BACKEND_URL = "http://localhost:4243";
-
 
 const ReportView = (_props: ExtensionContextValue) => {
   const [startDate, setStartDate] = useState<string>("");
@@ -22,14 +20,12 @@ const ReportView = (_props: ExtensionContextValue) => {
   const [status, setStatus] = useState<string>("");
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
-  // Get date 2 days ago as default end
   const getDefaultEndDate = () => {
     const d = new Date();
     d.setDate(d.getDate() - 2);
     return d.toISOString().split("T")[0];
   };
 
-  // Get date 32 days ago as default start
   const getDefaultStartDate = () => {
     const d = new Date();
     d.setDate(d.getDate() - 32);
@@ -39,59 +35,52 @@ const ReportView = (_props: ExtensionContextValue) => {
   const generateReport = useCallback(async () => {
     setLoading(true);
     setError(null);
-    setStatus("Connecting to backend...");
     setDownloadUrl(null);
 
     try {
       const start = startDate || getDefaultStartDate();
       const end = endDate || getDefaultEndDate();
-
       const startTs = Math.floor(new Date(start + "T00:00:00Z").getTime() / 1000);
       const endTs = Math.floor(new Date(end + "T00:00:00Z").getTime() / 1000);
 
-      setStatus("Generating report via backend (this may take a minute)...");
+      setStatus("Generating report via backend (see terminal for report id & status)...");
 
-      // Call backend to generate report with IC+ simulation
       const response = await fetch(`${BACKEND_URL}/generate-report`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          startTs,
-          endTs,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ startTs, endTs }),
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Backend error: ${response.status}`);
+        const errData = await response.json().catch(() => ({}));
+        const errMsg = errData.error || `Backend error: ${response.status}`;
+        if (errData.code === "API_KEY_MISSING" || errMsg.includes("API key")) {
+          setError(
+            "Backend needs an API key. Run 'stripe login' or set stripe_api_key in config.json (see README)."
+          );
+        } else {
+          setError(errMsg);
+        }
+        setStatus("");
+        return;
       }
 
       const result = await response.json();
-
-      if (!result.success || !result.csv) {
-        throw new Error("Backend returned no data");
+      if (!result.success || !result.downloadUrl) {
+        setError("Backend returned no data");
+        setStatus("");
+        return;
       }
 
+      setDownloadUrl(result.downloadUrl);
       setStatus(
-        `Simulation complete: ${result.originalRows} rows → ${result.simulatedRows} rows`
+        `Done! ${result.originalRows} → ${result.simulatedRows} rows. Click to download.`
       );
-
-      // Use the backend download endpoint (blob URLs don't work in sandboxed iframe)
-      setDownloadUrl(`${BACKEND_URL}/download`);
-
-      setStatus("Report ready for download!");
     } catch (err) {
       console.error("Error:", err);
-      const message = err instanceof Error ? err.message : "An error occurred";
-      
-      // Check if it's a connection error
-      if (message.includes("fetch") || message.includes("network") || message.includes("Failed to fetch")) {
-        setError(
-          "Cannot connect to backend. Make sure the backend server is running:\n" +
-          "cd stripe-app/backend && npm install && npm start"
-        );
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("fetch") || message.includes("Failed to fetch")) {
+        setError("Cannot reach backend. Start it with: npm run start:backend (or npm start)");
       } else {
         setError(message);
       }
@@ -169,7 +158,7 @@ const ReportView = (_props: ExtensionContextValue) => {
                 <Button type="secondary">Download CSV with IC+ Simulation</Button>
               </Link>
               <Box css={{ font: "caption", color: "secondary" }}>
-                IC+ fee breakdown applied - click to download
+                IC+ fee breakdown applied — click to download
               </Box>
             </Box>
           )}
@@ -180,13 +169,13 @@ const ReportView = (_props: ExtensionContextValue) => {
         <Box css={{ stack: "y", gap: "small" }}>
           <Box css={{ font: "caption", fontWeight: "bold" }}>What this does:</Box>
           <Box css={{ font: "caption", color: "secondary" }}>
-            • Downloads the activity.itemized.3 report from Stripe
+            • Backend creates the report (report id and status in terminal)
           </Box>
           <Box css={{ font: "caption", color: "secondary" }}>
-            • Transforms payments_fee into detailed IC+ components
+            • Downloads activity.itemized.3 from Stripe, runs IC+ simulation
           </Box>
           <Box css={{ font: "caption", color: "secondary" }}>
-            • Adds refund fee reversal lines for refunds
+            • Transforms payments_fee into detailed IC+ components; adds refund reversal lines
           </Box>
         </Box>
       </Box>

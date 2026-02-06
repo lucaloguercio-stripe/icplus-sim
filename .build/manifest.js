@@ -2,7 +2,7 @@
 import ReportView from '../src/views/ReportView';
 
 export * from '@stripe/ui-extension-sdk/version';
-export const BUILD_TIME = '2026-02-04 18:13:26.043342 +0100 CET m=+0.395447460';
+export const BUILD_TIME = '2026-02-06 13:47:05.45841 +0100 CET m=+0.373756292';
 
 export { 
   ReportView	

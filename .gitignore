@@ -1,1 +1,3 @@
 node_modules/
+# Do not commit secrets (copy config.example.json to config.json)
+config.json

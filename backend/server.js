@@ -3,64 +3,141 @@ const cors = require("cors");
 const Stripe = require("stripe");
 const fs = require("fs");
 const path = require("path");
+const { execSync } = require("child_process");
 
-// Load config from parent directory
-const configPath = path.join(__dirname, "../../config.json");
-let config = {};
-if (fs.existsSync(configPath)) {
-  config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+// Load config from this project only (icplus-sim/config.json)
+function loadConfig() {
+  const configPath = path.join(__dirname, "../config.json");
+  if (fs.existsSync(configPath)) {
+    return JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  }
+  return {};
+}
+const config = loadConfig();
+const VERBOSE =
+  config.verbose === true ||
+  config.verbose === "true" ||
+  (config.verbose !== false && config.verbose !== "false");
+
+function log(...args) {
+  if (VERBOSE) console.log("[icplus-sim]", ...args);
 }
 
-const stripe = new Stripe(config.stripe_api_key || process.env.STRIPE_API_KEY);
+/** Cached key from Stripe CLI (avoids running stripe config --list more than once). */
+let cachedStripeCliKey = undefined;
+
+/**
+ * Get API key from Stripe CLI config (stripe login).
+ * Uses the same key as the CLI so each developer uses their own account — no static key in code.
+ */
+function getStripeCliApiKey() {
+  if (cachedStripeCliKey !== undefined) return cachedStripeCliKey;
+  try {
+    const out = execSync("stripe config --list", {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const m = out.match(/test_mode_api_key\s*=\s*['"]([^'"]+)['"]/);
+    cachedStripeCliKey = m ? m[1].trim() : null;
+  } catch {
+    cachedStripeCliKey = null;
+  }
+  return cachedStripeCliKey;
+}
+
+function getApiKeySource() {
+  if ((process.env.STRIPE_API_KEY || "").trim()) return "STRIPE_API_KEY env";
+  if ((config.stripe_api_key || "").trim()) return "config.json";
+  if (getStripeCliApiKey()) return "stripe login (CLI config)";
+  return null;
+}
+
+function getApiKey() {
+  const fromEnv = (process.env.STRIPE_API_KEY || "").trim();
+  if (fromEnv) return fromEnv;
+  const fromConfig = (config.stripe_api_key || "").trim();
+  if (fromConfig) return fromConfig;
+  const fromCli = getStripeCliApiKey();
+  if (fromCli) return fromCli;
+  return null;
+}
+
+const API_KEY_MISSING_MESSAGE =
+  "Stripe API key is not configured. " +
+  "Run 'stripe login', or set STRIPE_API_KEY, or add stripe_api_key to config.json in this project. " +
+  "See https://dashboard.stripe.com/test/apikeys if you need a key.";
+
+const apiKey = getApiKey();
+const stripe = apiKey ? new Stripe(apiKey) : null;
 
 const app = express();
 app.use(cors({ origin: "*" })); // Allow requests from sandboxed iframe (null origin)
 app.use(express.json());
 
-// Activity report columns
+// Activity report (activity.itemized.3) columns — from pay-server
+// lib/financial_reporting/reports/activity/merchant_itemized3.rb Schema
 const ACTIVITY_COLUMNS = [
   "balance_transaction_id",
   "balance_transaction_created_at",
   "balance_transaction_reporting_category",
   "balance_transaction_component",
-  "event_type",
+  "balance_transaction_regulatory_tag",
   "activity_at",
-  "activity_interval_type",
-  "activity_start_date",
-  "activity_end_date",
   "currency",
   "amount",
-  "customer_facing_currency",
-  "customer_facing_amount",
-  "balance_transaction_description",
+  "charge_id",
+  "payment_intent_id",
+  "refund_id",
+  "dispute_id",
+  "invoice_id",
+  "invoice_number",
+  "subscription_id",
   "fee_id",
+  "transfer_id",
+  "destination_id",
   "customer_id",
   "customer_email",
   "customer_name",
   "customer_description",
+  "customer_shipping_address_line1",
+  "customer_shipping_address_line2",
+  "customer_shipping_address_city",
+  "customer_shipping_address_state",
+  "customer_shipping_address_postal_code",
+  "customer_shipping_address_country",
+  "customer_address_line1",
+  "customer_address_line2",
+  "customer_address_city",
+  "customer_address_state",
+  "customer_address_postal_code",
+  "customer_address_country",
   "shipping_address_line1",
   "shipping_address_line2",
   "shipping_address_city",
   "shipping_address_state",
   "shipping_address_postal_code",
   "shipping_address_country",
+  "card_address_line1",
+  "card_address_line2",
+  "card_address_city",
+  "card_address_state",
+  "card_address_postal_code",
+  "card_address_country",
   "automatic_payout_id",
   "automatic_payout_effective_at",
-  "charge_id",
-  "payment_intent_id",
-  "invoice_id",
-  "subscription_id",
+  "event_type",
   "payment_method_type",
   "is_link",
   "card_brand",
   "card_funding",
   "card_country",
   "statement_descriptor",
-  "payment_metadata[mirakl_commercial_order_id]",
-  "payment_metadata[country]",
-  "refund_id",
-  "dispute_id",
-  "transfer_id",
+  "customer_facing_currency",
+  "customer_facing_amount",
+  "activity_interval_type",
+  "activity_start_date",
+  "activity_end_date",
+  "balance_transaction_description",
   "connected_account_id",
   "connected_account_name",
   "connected_account_country",
@@ -136,7 +213,7 @@ function csvValueToString(value) {
 // ============= IC+ Fee Simulation =============
 // This matches the CLI's simulation logic
 function simulateIcPlusFees(records) {
-  console.log("Simulating IC+ fee breakdown...");
+  log("Simulating IC+ fee breakdown...");
 
   // Pass 1: Transform payments_fee records
   const transformedRecords = [];
@@ -265,7 +342,7 @@ function simulateIcPlusFees(records) {
     }
   }
 
-  console.log(
+  log(
     `Fee simulation: ${records.length} -> ${finalRecords.length} records`,
   );
   return finalRecords;
@@ -273,7 +350,8 @@ function simulateIcPlusFees(records) {
 
 // ============= Report Generation =============
 async function generateReport(startTs, endTs, accountId) {
-  console.log(`Creating report for ${startTs} to ${endTs}`);
+  if (!stripe) throw new Error(API_KEY_MISSING_MESSAGE);
+  log(`Creating report for ${startTs} to ${endTs}`);
 
   // Create report run using API key (API context, not dashboard)
   const reportRun = await stripe.reporting.reportRuns.create(
@@ -288,7 +366,7 @@ async function generateReport(startTs, endTs, accountId) {
     accountId ? { stripeAccount: accountId } : undefined,
   );
 
-  console.log(`Report run created: ${reportRun.id}`);
+  log(`Report run created: ${reportRun.id}`);
 
   // Poll for completion
   let currentRun = reportRun;
@@ -299,7 +377,7 @@ async function generateReport(startTs, endTs, accountId) {
       {},
       accountId ? { stripeAccount: accountId } : undefined,
     );
-    console.log(`Report status: ${currentRun.status}`);
+    log(`Report status: ${currentRun.status}`);
   }
 
   if (currentRun.status !== "succeeded") {
@@ -316,7 +394,7 @@ async function generateReport(startTs, endTs, accountId) {
     throw new Error("No result file ID");
   }
 
-  console.log(`Downloading file: ${fileId}`);
+  log(`Downloading file: ${fileId}`);
 
   const file = await stripe.files.retrieve(
     fileId,
@@ -330,9 +408,10 @@ async function generateReport(startTs, endTs, accountId) {
 
   // Download CSV with authentication
   // The file URL requires Bearer token authentication
-  const apiKey = config.stripe_api_key || process.env.STRIPE_API_KEY;
+  const key = getApiKey();
+  if (!key) throw new Error(API_KEY_MISSING_MESSAGE);
   const headers = {
-    Authorization: `Bearer ${apiKey}`,
+    Authorization: `Bearer ${key}`,
   };
 
   // Add Stripe-Account header if downloading for a connected account
@@ -359,7 +438,18 @@ let lastGeneratedReport = {
 
 // Health check
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", hasApiKey: !!config.stripe_api_key });
+  log("GET /health");
+  const hasApiKey = !!getApiKey();
+  if (hasApiKey) {
+    res.json({ status: "ok", hasApiKey: true });
+  } else {
+    res.status(503).json({
+      status: "error",
+      hasApiKey: false,
+      error: "API key not configured",
+      message: API_KEY_MISSING_MESSAGE,
+    });
+  }
 });
 
 // Download the last generated report as a file
@@ -378,16 +468,57 @@ app.get("/download", (req, res) => {
   res.send(lastGeneratedReport.csv);
 });
 
+// Download a Stripe file by URL (used when UI extension cannot fetch file.url directly)
+app.post("/download-file", async (req, res) => {
+  log("POST /download-file");
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    return res.status(503).json({
+      error: API_KEY_MISSING_MESSAGE,
+      code: "API_KEY_MISSING",
+    });
+  }
+  const { fileUrl } = req.body;
+  if (!fileUrl || typeof fileUrl !== "string") {
+    return res.status(400).json({ error: "fileUrl required" });
+  }
+  try {
+    log("Downloading file from Stripe...");
+    const response = await fetch(fileUrl, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!response.ok) {
+      log("Stripe file download failed:", response.status);
+      return res.status(response.status).json({
+        error: `Stripe file download failed: ${response.status}`,
+      });
+    }
+    const text = await response.text();
+    log("Downloaded", text.length, "bytes");
+    res.type("text/csv").send(text);
+  } catch (err) {
+    console.error("[icplus-sim] download-file error:", err);
+    res.status(500).json({ error: err.message || "Download failed" });
+  }
+});
+
 // Generate report with IC+ simulation
 app.post("/generate-report", async (req, res) => {
+  log("POST /generate-report");
   try {
+    if (!getApiKey()) {
+      return res.status(503).json({
+        error: API_KEY_MISSING_MESSAGE,
+        code: "API_KEY_MISSING",
+      });
+    }
     const { startTs, endTs, accountId } = req.body;
 
     if (!startTs || !endTs) {
       return res.status(400).json({ error: "startTs and endTs required" });
     }
 
-    console.log(`Generating report: ${startTs} to ${endTs}`);
+    log(`Generating report: ${startTs} to ${endTs}`);
 
     // Generate report using API key
     const csvData = await generateReport(startTs, endTs, accountId);
@@ -396,13 +527,13 @@ app.post("/generate-report", async (req, res) => {
     const records = parseCsv(csvData);
 
     // Debug: Log sample of original records
-    console.log(`Parsed ${records.length} records from CSV`);
+    log(`Parsed ${records.length} records from CSV`);
     if (records.length > 0) {
-      console.log("Sample record keys:", Object.keys(records[0]));
+      log("Sample record keys:", Object.keys(records[0]));
       const feeRecords = records.filter(
         (r) => r.balance_transaction_component === "payments_fee",
       );
-      console.log(
+      log(
         `Found ${feeRecords.length} payments_fee records to transform`,
       );
     }
@@ -410,7 +541,7 @@ app.post("/generate-report", async (req, res) => {
     const simulatedRecords = simulateIcPlusFees(records);
     const outputCsv = recordsToCsv(simulatedRecords);
 
-    console.log(
+    log(
       `Simulation complete: ${records.length} -> ${simulatedRecords.length} rows`,
     );
 
@@ -432,12 +563,22 @@ app.post("/generate-report", async (req, res) => {
     });
   } catch (error) {
     console.error("Error:", error);
-    res.status(500).json({ error: error.message });
+    const message = error.message || "Unknown error";
+    const code = message === API_KEY_MISSING_MESSAGE ? "API_KEY_MISSING" : undefined;
+    res.status(500).json({ error: message, ...(code && { code }) });
   }
 });
 
 const PORT = process.env.PORT || 4243;
 app.listen(PORT, () => {
+  const configPath = path.join(__dirname, "../config.json");
   console.log(`Backend running on http://localhost:${PORT}`);
-  console.log(`API key configured: ${!!config.stripe_api_key}`);
+  console.log(`Config: ${fs.existsSync(configPath) ? configPath : "none"}`);
+  console.log(`Verbose: ${VERBOSE}`);
+  const source = getApiKeySource();
+  if (source) {
+    console.log(`API key: ${source}`);
+  } else {
+    console.warn("\n  " + API_KEY_MISSING_MESSAGE + "\n");
+  }
 });
