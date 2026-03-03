@@ -27,6 +27,10 @@ npm install
 
 If the Stripe CLI is missing, install it from https://stripe.com/docs/stripe-cli, then run `npm run setup` again.
 
+## Required Gate
+
+In order to use this Stripe App, the account must be gated into `enable_activity_reports_gate`
+
 ## Config (inside this project only)
 
 All config is in **this folder**. The backend reads `config.json` at the project root (icplus-sim/config.json).
